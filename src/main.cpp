@@ -46,24 +46,18 @@ uint16_t getSecurityColor(wifi_auth_mode_t);
 String getEncryptionType(wifi_auth_mode_t);
 uint16_t getRSSIColor(int rssi);
 
-// TODO: Create a callback class for BLE scanning
-// Will be called whenever a BLE device is found
 
 class MyAdvertisedDeviceCallbacks: public BLEAdvertisedDeviceCallbacks {
   void onResult(BLEAdvertisedDevice advertisedDevice) {
-    // TODO: This function is called for EACH device found
-    // Need to:
-    // 1. Check if we have room in our arrays (bleDeviceCount < MAX_BLE_DEVICES)
-      // 2. Store the device name (or MAC if no name)
-      // 3. Store the MAC address
-      // 4. Store the RSSI
-      // 5. Increment bleDeviceCount
-      
-      // HINT: advertisedDevice.getName() gets the name (might be empty!)
-      // HINT: advertisedDevice.getAddress().toString() gets MAC
-      // HINT: advertisedDevice.getRSSI() gets signal strength
-      
-      // YOUR CODE HERE
+    if (bleDeviceCount < MAX_BLE_DEVICES) {
+      String name = advertisedDevice.getName().c_str();
+
+      bleDeviceNames[bleDeviceCount] = advertisedDevice.getName().c_str();
+      bleDeviceMACs[bleDeviceCount] = advertisedDevice.getAddress().toString().c_str();
+      bleDeviceRSSI[bleDeviceCount] = advertisedDevice.getRSSI();
+
+      bleDeviceCount++;
+    }
   }
 };
 
@@ -87,16 +81,13 @@ void setup() {
   WiFi.mode(WIFI_STA); 
   WiFi.disconnect();
 
-  // TODO: Initialize BLE
-  // HINT: BLEDevice::init("M5Scanner");
-  // HINT: Create a scan object: pBLEScan = BLEDevice::getScan()
-  // HINT: Set the callback: pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks())
-  // HINT: Configure scan: pBLEScan->setActiveScan(true)
-  // HINT: Set scan interval: pBLEScan->setInterval(100)
-  // HINT: Set scan window: pBLEScan->setWindow(99)
-  
-  // YOUR CODE HERE
-  
+  BLEDevice::init("M5Scanner");
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->setInterval(100);
+  pBLEScan->setWindow(99);
+    
 }
 
 void loop() {
@@ -130,11 +121,13 @@ void loop() {
 }
 
 void switchMode() {
-  // TODO: Toggle between WIFI_MODE and BLE_MODE
-  // HINT: if (currentMode == WIFI_MODE) { currentMode = BLE_MODE; } else { ... }
-  
-  // YOUR CODE HERE
-  
+  // Toggle between WIFI_MODE and BLE_MODE
+  if (currentMode == WIFI_MODE) {
+    currentMode = BLE_MODE;
+  } else {
+    currentMode = WIFI_MODE;
+  }
+
   scrollOffset = 0;  // Reset scroll when switching modes
   
   // Show mode indicator
@@ -172,11 +165,7 @@ void performWifiScan() {
 }
 
 void performBLEScan() {
-   // TODO: Reset BLE device arrays
-  // HINT: Set bleDeviceCount = 0
-  // This clears previous scan results
-  
-  // YOUR CODE HERE
+  bleDeviceCount = 0;
   
   M5.Lcd.fillScreen(BLACK);
   M5.Lcd.setCursor(10, 10);
@@ -186,13 +175,8 @@ void performBLEScan() {
   
   scrollOffset = 0;
   
-  // TODO: Start BLE scan
-  // HINT: pBLEScan->start(scanTime, false)
-  // scanTime = how long to scan (try 5 seconds)
-  // false = don't delete results after scan
-  
-  int scanTime = 5;  // seconds
-  // YOUR CODE HERE
+  int scanTime = 5;
+  BLEScanResults foundDevices = pBLEScan->start(scanTime, false);
   
   displayBLEDevices();
 }
@@ -209,34 +193,26 @@ void displayBLEDevices() {
   
   int yPos = 20;
   
-  // TODO: Calculate start and end indices for scrolling
-  // HINT: Same logic as Wi-Fi display
   int startIndex = scrollOffset;
-  int endIndex = /* YOUR CODE HERE */;
+  int endIndex = min(startIndex + MAX_VISIBLE_NETWORKS, bleDeviceCount);
   
   for (int i = startIndex; i < endIndex; i++) {
-      // TODO: Get device info from arrays
-      String name = /* YOUR CODE HERE */;
-      String mac = /* YOUR CODE HERE */;
-      int rssi = /* YOUR CODE HERE */;
+      String name = bleDeviceNames[i];
+      String mac = bleDeviceMACs[i];
+      int rssi = bleDeviceRSSI[i];
 
-      // Choose color based on signal strength
       uint16_t color = getRSSIColor(rssi);
       
       M5.Lcd.setTextColor(color);
       M5.Lcd.setCursor(5, yPos);
       
-      // TODO: Display device info
-      // If device has no name, show MAC address
-      // Format: "DeviceName" or "[MAC]"
-      //         "RSSI: -65 dBm"
-      
+      // Display device info
       if (name.length() > 0) {
           // Has a name
-          // YOUR CODE HERE - truncate if > 20 chars
+          M5.Lcd.printf("%-20s  | ", name);
       } else {
           // No name, show MAC
-          // YOUR CODE HERE
+          M5.Lcd.printf("%s | ", mac);
       }
       
       M5.Lcd.printf(" %ddBm\n", rssi);
@@ -301,17 +277,15 @@ void scrollDown() {
     maxOffset = max(0, networkCount - MAX_VISIBLE_NETWORKS);  
   } else {
     // TODO: Calculate maxOffset for BLE mode
-    maxOffset = ;
+    maxOffset = max(0, bleDeviceCount - MAX_VISIBLE_NETWORKS);
   }
 
   if (scrollOffset < maxOffset) {
     // Increase the scrollOffset
     scrollOffset += MAX_VISIBLE_NETWORKS;
-    // displayNetworks();
   } else {
     // Wrap Around: Goes back to the start of the list if at end
     scrollOffset = 0;
-    // displayNetworks();
   }
   
   if (currentMode == WIFI_MODE) {
@@ -344,25 +318,18 @@ void drawScrollIndicator() {
 
   int totalItems = (currentMode == WIFI_MODE) ? networkCount : bleDeviceCount;
   int currentPage = scrollOffset / MAX_VISIBLE_NETWORKS + 1;
-  int totalPages = (networkCount + MAX_VISIBLE_NETWORKS - 1) / MAX_VISIBLE_NETWORKS;
+  int totalPages = (totalItems + MAX_VISIBLE_NETWORKS - 1) / MAX_VISIBLE_NETWORKS;
 
   String modeStr = (currentMode == WIFI_MODE) ? "WiFi" : "BLE";
   M5.Lcd.printf("%s | Page %d/%d", modeStr.c_str(), currentPage, totalPages);
 
 }
 
-// TODO: Create a function to color-code by signal strength
-// Stronger signal = greener, weaker = redder
 uint16_t getRSSIColor(int rssi) {
-    // HINT: RSSI ranges typically from -30 (very close) to -90 (far away)
-    // -30 to -50: GREEN (excellent)
-    // -50 to -70: YELLOW (good)
-    // -70 to -85: ORANGE (fair)
-    // -85+: RED (poor)
-    
-    // YOUR CODE HERE
-    
-    return WHITE;  // default
+    if (rssi > -50) return TFT_GREEN;      
+    else if (rssi > -70) return TFT_YELLOW; 
+    else if (rssi > -85) return TFT_ORANGE; 
+    else return TFT_RED;                    
 }
 
 // Security Colors for wifi encryption types
