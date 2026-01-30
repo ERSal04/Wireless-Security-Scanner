@@ -41,6 +41,7 @@ void scrollDown();
 void scrollUp();
 void drawScrollIndicator();
 void switchMode();
+void initBLE();
 String formatMAC(String);
 
 uint16_t getSecurityColor(wifi_auth_mode_t);
@@ -90,17 +91,6 @@ void setup() {
   M5.Lcd.setCursor(40, 170);
   M5.Lcd.println("Starting in Wi-Fi mode...");
 
-  // Initialize BLE Scanner
-  BLEDevice::init("M5Scanner");
-  pBLEScan = BLEDevice::getScan();
-  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
-  pBLEScan->setActiveScan(true);
-  pBLEScan->setInterval(100);
-  pBLEScan->setWindow(99);
-
-  btStop();
-  delay(100);
-
   // Initialize Wi-Fi
   WiFi.mode(WIFI_STA); 
   WiFi.disconnect();
@@ -115,18 +105,18 @@ void loop() {
   static unsigned long lastTouchTime = 0;
   if (M5.Touch.ispressed()) {
     if (millis() - lastTouchTime > 1000) {
-      if (currentMode == WIFI_MODE) {
-      performWifiScan();
-    } else {
-      performBLEScan();
-    }
+      switchMode();
       lastTouchTime = millis();
     }
   }
 
   // Normal press: Scan in current mod
   if (M5.BtnA.wasPressed()) {
-    switchMode();
+    if (currentMode == WIFI_MODE) {
+      performWifiScan();
+    } else {
+      performBLEScan();
+    }
   }
 
   // Check if button B was pressed (Scroll Down)
@@ -150,20 +140,22 @@ void switchMode() {
     WiFi.disconnect(true);
     WiFi.mode(WIFI_OFF);
 
-    if (!btStarted()) {
-      btStart();
-    }
+    btStart();
+    delay(100);
+    initBLE();
+
   } else {
     currentMode = WIFI_MODE;
 
-    if (btStarted()) {
-      btStop();
+    if (pBLEScan) {
+      pBLEScan->clearResults();
     }
+
+    btStop();
     delay(100);
 
     WiFi.mode(WIFI_STA);
-    WiFi.disconnect();
-    delay(100);
+    WiFi.disconnect(true);
   }
 
   scrollOffset = 0;  // Reset scroll when switching modes
@@ -235,8 +227,8 @@ void performBLEScan() {
   
   // Start BLE scan
   int scanTime = 5;  // seconds
-  
-  BLEScanResults foundDevices = pBLEScan->start(scanTime, false);
+  pBLEScan->start(scanTime, false);
+  pBLEScan->clearResults();
 
   if (bleDeviceCount == 0) {
     M5.Lcd.fillScreen(BLACK);
@@ -410,6 +402,15 @@ uint16_t getRSSIColor(int rssi) {
     else if (rssi > -70) return TFT_YELLOW;
     else if (rssi > -85) return TFT_ORANGE;
     else return TFT_RED;
+}
+
+void initBLE() {
+  BLEDevice::init("M5Scanner");
+  pBLEScan = BLEDevice::getScan();
+  pBLEScan->setAdvertisedDeviceCallbacks(new MyAdvertisedDeviceCallbacks());
+  pBLEScan->setActiveScan(true);
+  pBLEScan->setInterval(100);
+  pBLEScan->setWindow(99);
 }
 
 String formatMAC(String mac) {
